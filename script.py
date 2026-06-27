@@ -2,6 +2,8 @@ import dearpygui.dearpygui as dpg
 from tkinter import filedialog
 import asyncio
 import os
+import psutil
+import time
 
 WindowWidth = 775
 WindowHeight = 347
@@ -22,16 +24,14 @@ class Globals():
     ColdIntensity = 1
     HungerRate = 1
 
-async def kill_process():
-    Globals.ServerProc.kill()
-    await Globals.ServerProc.wait()
-
 def save_prefs():
-    if Globals.ServerProc != asyncio.subprocess.Process:
-        asyncio.run(kill_process)
     Globals.HasOpenedBefore = True
     with open("prefs.ini", 'w') as f:
         f.write(f"{Globals.ServerPath}\n{Globals.LogPath}\n{Globals.HasOpenedBefore}")
+        f.close()
+
+if not os.path.exists("prefs.ini"):
+    with open("prefs.ini",mode='w') as f:
         f.close()
 
 with open("prefs.ini",mode='r') as f:
@@ -46,16 +46,22 @@ with open("prefs.ini",mode='r') as f:
     f.close()
 
 dpg.create_context()
-dpg.create_viewport(title='Dread Hunger Server', width=WindowWidth, height=WindowHeight)
+dpg.create_viewport(title='Dread Hunger Server', width=WindowWidth, height=WindowHeight,large_icon="assets/logo.ico",small_icon="assets/logo.ico")
 dpg.set_exit_callback(save_prefs)
 dpg.configure_app( docking=True, docking_space=True, init_file="windows.ini")
 
 with dpg.font_registry():
-    default_font = dpg.add_font("assets/StackSansText-ExtraLight.ttf", 13)
+    default_font = dpg.add_font("assets/Roboto-Regular.ttf", 13)
     dpg.bind_font(font=default_font)
 
 def server_starter():
     asyncio.run(start_server())
+
+def kill_process():
+    for child in psutil.Process(Globals.ServerProc.pid).children(recursive=True):
+            child.kill()
+    
+    Globals.ServerProc.kill()
 
 async def start_server():
 
@@ -68,8 +74,8 @@ async def start_server():
     Globals.LogPath = Globals.ServerPath.removesuffix("Server.exe") + "/Saved/Logs/OverlayLog.txt"
 
     try:
-        Globals.ServerProc = await asyncio.subprocess.create_subprocess_exec(
-            Globals.ServerPath,f"{Globals.MapCode}?maxplayers={Globals.MaxPlayers}?daysbeforeblizzard={Globals.DaysUntilBlizzard}?dayminutes={Globals.DayMinutes}?predatordamage={Globals.PredatorDamage}?coldintensity={Globals.ColdIntensity}?hungerrate={Globals.HungerRate}?coalburnrate={Globals.CoalBurnRate}?thralls={Globals.ThrallCount} LOG=OverlayLog.txt nouniques"
+        Globals.ServerProc = await asyncio.subprocess.create_subprocess_shell(
+            f"{Globals.ServerPath} {Globals.MapCode}?maxplayers={Globals.MaxPlayers}?daysbeforeblizzard={Globals.DaysUntilBlizzard}?dayminutes={Globals.DayMinutes}?predatordamage={Globals.PredatorDamage}?coldintensity={Globals.ColdIntensity}?hungerrate={Globals.HungerRate}?coalburnrate={Globals.CoalBurnRate}?thralls={Globals.ThrallCount} -LOG=OverlayLog.txt nouniques"
         )
     except: 
         Globals.ServerPath = ""
@@ -77,20 +83,26 @@ async def start_server():
         dpg.set_value("console_text", Globals.ConsoleText)
 
     while not Globals.ServerProc.returncode:
-        with open(Globals.LogPath) as f: s = f.read()
-        Globals.ConsoleText = s
-        dpg.set_value("console_text", Globals.ConsoleText)
 
-        ScrollLimit = dpg.get_y_scroll_max(item="console_window")
-        dpg.set_y_scroll(item="console_window",value=ScrollLimit)
-
-        if dpg.is_key_pressed(dpg.mvKey_Escape):
+        time.sleep(0.05)
+        try:
+            with open(Globals.LogPath) as f: s = f.read()
+            Globals.ConsoleText = s
+            dpg.set_value("console_text", Globals.ConsoleText)
+        except:
+            Globals.ConsoleText = "Log file not found"
+            dpg.set_value("console_text", Globals.ConsoleText)
             break
 
-            
-    asyncio.run(kill_process())
-    Globals.ConsoleText = "Server Interupted"
-    dpg.set_value("console_text", Globals.ConsoleText)
+        dpg.set_y_scroll(item="console_window",value=dpg.get_y_scroll_max(item="console_window"))
+
+        if dpg.is_key_pressed(dpg.mvKey_Escape):
+            Globals.ConsoleText = "Server Interupted"
+            dpg.set_value("console_text", Globals.ConsoleText)
+            break
+
+    kill_process()
+    
     
 
 def set_map(map: str):
@@ -128,8 +140,7 @@ with dpg.window(label="Console",width=WindowHeight,height=WindowWidth,no_close=T
     dpg.add_text(label="",tag="console_text",wrap=WindowWidth)
 
 with dpg.window(label="Start Server",width=WindowWidth,height=WindowHeight,no_close=True, on_close=save_prefs):
-
-    dpg.add_combo(items=("Approach","The Expanse","The Summit"),label="Select A Map",width=150,callback=set_map)
+    dpg.add_combo(items=("Approach","The Expanse","The Summit"),label="Select A Map",width=150,callback=set_map,default_value="Approach")
     dpg.add_slider_int(label="Days Until Blizzard",default_value=3,min_value=1,max_value=10,width=150, callback=set_days_until_blizz)
     dpg.add_slider_int(label="Day Minutes",default_value=8,min_value=1,max_value=50,width=150,callback=set_day_mins)
     dpg.add_text("Player Settings")
