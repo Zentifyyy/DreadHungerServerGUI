@@ -1,12 +1,11 @@
 import dearpygui.dearpygui as dpg
-from tkinter import filedialog
 import asyncio
 import os
-import psutil
 
 class Globals():
     ServerProc = asyncio.subprocess.Process
     ServerPath = ""
+    ModLoader = False
     LogPath = ""
     HasOpenedBefore = False
     ConsoleText = ""
@@ -19,6 +18,7 @@ class Globals():
     CoalBurnRate = 1
     ColdIntensity = 1
     HungerRate = 1
+    ConsoleUpdateRate = 0.1
 
 def save_prefs():
     Globals.HasOpenedBefore = True
@@ -43,8 +43,9 @@ with open("prefs.ini",mode='r') as f:
 
 def set_server_path():
     try:
+        from tkinter import filedialog
         Globals.ServerPath = filedialog.askopenfile().name
-        set_console_text("Server path set to: " + Globals.ServerPath)
+        set_console_text(f"Server path set to: {Globals.ServerPath}")
     except: 
         set_console_text("User canceled file selection")
     
@@ -74,6 +75,7 @@ def server_starter():
     asyncio.run(start_server())
 
 def kill_server():
+    import psutil
     if Globals.ServerProc is None:
         return
     
@@ -89,18 +91,23 @@ async def start_server():
         set_server_path()
 
     try:
+        args = f"{Globals.MapCode}?maxplayers={Globals.MaxPlayers}?daysbeforeblizzard={Globals.DaysUntilBlizzard}?dayminutes={Globals.DayMinutes}?predatordamage={Globals.PredatorDamage}?coldintensity={Globals.ColdIntensity}?hungerrate={Globals.HungerRate}?coalburnrate={Globals.CoalBurnRate}?thralls={Globals.ThrallCount} -LOG=OverlayLog.txt nouniques"
         Globals.ServerProc = await asyncio.subprocess.create_subprocess_shell(
-            f"{'"'}{Globals.ServerPath}{'"'} {Globals.MapCode}?maxplayers={Globals.MaxPlayers}?daysbeforeblizzard={Globals.DaysUntilBlizzard}?dayminutes={Globals.DayMinutes}?predatordamage={Globals.PredatorDamage}?coldintensity={Globals.ColdIntensity}?hungerrate={Globals.HungerRate}?coalburnrate={Globals.CoalBurnRate}?thralls={Globals.ThrallCount} -LOG=OverlayLog.txt nouniques"
+            f"{'"'}{Globals.ServerPath}{'"'} {args}"
         )
-
-        dpg.configure_viewport('Dread Hunger Server',disable_close=True)
+        if Globals.ModLoader:
+            import dll_injector
+            import psutil
+            dll_injector.inject(Globals.ServerPath.removesuffix("DreadHungerServer.exe") + "frida.dll",process_pid=psutil.Process(Globals.ServerProc.pid).children(recursive=True)[1].pid)
+                
+        dpg.configure_viewport("Dread Hunger Server",disable_close=True)
     except: 
         Globals.ServerPath = ""
         set_console_text("Server could not be started")
 
     while not Globals.ServerProc.returncode:
 
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(Globals.ConsoleUpdateRate)
         
         try:
             with open(Globals.LogPath,'r') as f: s = f.read()
@@ -118,41 +125,44 @@ async def start_server():
     dpg.configure_viewport("Dread Hunger Server",disable_close=False)
     kill_server()
 
-def set_map(map: str):
-    if map == "Approach": 
-        Globals.MapCode = "Approach_Persistent"
-    elif map == "The Summit":
-        Globals.MapCode = "Departure_Persistent"
-    else: map = "Expanse_Persistent"
+def set_settings(sender,app_data):
+    match sender:
+        case "map":
+            if app_data == "Approach": 
+                Globals.MapCode = "Approach_Persistent"
+            elif app_data == "The Summit":
+                Globals.MapCode = "Departure_Persistent"
+            else: Globals.MapCode = "Expanse_Persistent"
+        case "blizzdays":
+            Globals.DaysUntilBlizzard = app_data
+        case "daymins":
+            Globals.DayMinutes = app_data
+        case "maxplayers":
+            Globals.MaxPlayers = app_data
+        case "thralls":
+            Globals.ThrallCount = app_data
+        case "preddamage":
+            Globals.PredatorDamage = round(app_data,3)
+        case "coalburn":
+            Globals.CoalBurnRate = round(app_data,3)
+        case "coldintens":
+            Globals.ColdIntensity= round(app_data,3)
+        case "hunger":
+            Globals.HungerRate = round(app_data,3)
+        case "mods":
+            Globals.ModLoader = app_data
 
-def set_days_until_blizz(days:int):
-    Globals.DaysUntilBlizzard = days
+def set_console_delay(sender,app_data):
+    Globals.ConsoleUpdateRate = round(app_data,2)
 
-def set_day_mins(mins:int):
-    Globals.DayMinutes = mins
-
-def set_max_players(players:int):
-    Globals.MaxPlayers = players
-
-def set_thralls(thralls:int):
-    Globals.ThrallCount = thralls
-
-def set_pred_damage(preddamage:int):
-    Globals.PredatorDamage = preddamage
-
-def set_coal_burn_rate(burnrate:int):
-    Globals.CoalBurnRate = burnrate
-
-def set_cold_intensity(cold:int):
-    Globals.ColdIntensity= cold
-
-def set_hunger(hunger:int):
-    Globals.HungerRate = hunger
 
 with dpg.viewport_menu_bar():
     with dpg.menu(label="File"):
         dpg.add_menu_item(label="Set Server Path", callback=set_server_path)
         dpg.add_menu_item(label="Save Prefs",callback=save_prefs)
+        dpg.add_slider_float(label="Console Update Delay" ,format='%.1f', callback=set_console_delay,default_value=0.1,min_value=0.1,max_value=2,width=100)
+        
+    with dpg.menu(label="About"):
         dpg.add_menu_item(label="About",callback=lambda:dpg.configure_item("about", show=True))
 
 with dpg.window(label="Console",width=WindowHeight,height=WindowWidth,no_close=True,tag="console_window",on_close=save_prefs):
@@ -160,21 +170,23 @@ with dpg.window(label="Console",width=WindowHeight,height=WindowWidth,no_close=T
 
 with dpg.window(label="Start Server",width=WindowWidth,height=WindowHeight,no_close=True):
 
-    dpg.add_combo(items=("Approach","The Expanse","The Summit"),label="Select A Map",width=150,callback=set_map,default_value="Approach")
-    dpg.add_slider_int(label="Days Until Blizzard",default_value=3,min_value=1,max_value=10,width=150, callback=set_days_until_blizz)
-    dpg.add_slider_int(label="Day Minutes",default_value=8,min_value=1,max_value=50,width=150,callback=set_day_mins)
+    dpg.add_combo(items=("Approach","The Expanse","The Summit"),label="Select A Map",width=150,callback=set_settings,tag="map",default_value="Approach")
+    dpg.add_slider_int(label="Days Until Blizzard",default_value=3,min_value=1,max_value=10,width=150, callback=set_settings ,tag="blizzdays")
+    dpg.add_slider_int(label="Day Minutes",default_value=8,min_value=1,max_value=50,width=150,callback=set_settings ,tag="daymins")
     dpg.add_text("Player Settings")
-    dpg.add_slider_int(label="Max Players",default_value=8,min_value=1,max_value=8,width=150, callback=set_max_players)
-    dpg.add_slider_int(label="Thrall Count",default_value=3,min_value=1,max_value=8,width=150, callback=set_thralls)
+    dpg.add_slider_int(label="Max Players",default_value=8,min_value=1,max_value=8,width=150, callback=set_settings ,tag="maxplayers")
+    dpg.add_slider_int(label="Thrall Count",default_value=3,min_value=1,max_value=8,width=150, callback=set_settings ,tag="thralls")
     
     dpg.add_text("Difficulty Settings")
 
-    dpg.add_slider_float(label="Predator Damage",default_value=1,min_value=0,max_value=2,format='%.2f',width=150, callback=set_pred_damage)
-    dpg.add_slider_float(label="Coal Burn Rate",default_value=1,min_value=0,max_value=2,format='%.2f',width=150, callback=set_coal_burn_rate)
-    dpg.add_slider_float(label="Cold Intensity",default_value=1,min_value=0,max_value=2,format='%.2f',width=150, callback=set_cold_intensity)
-    dpg.add_slider_float(label="Hunger Rate",default_value=1,min_value=0,max_value=2,format='%.2f',width=150, callback=set_hunger)
+    dpg.add_slider_float(label="Predator Damage",default_value=1,min_value=0,max_value=2,format='%.1f',width=150, callback=set_settings ,tag="preddamage")
+    dpg.add_slider_float(label="Coal Burn Rate",default_value=1,min_value=0,max_value=2,format='%.1f',width=150, callback=set_settings ,tag="coalburn")
+    dpg.add_slider_float(label="Cold Intensity",default_value=1,min_value=0,max_value=2,format='%.1f',width=150, callback=set_settings ,tag="coldintens")
+    dpg.add_slider_float(label="Hunger Rate",default_value=1,min_value=0,max_value=2,format='%.1f',width=150, callback=set_settings ,tag="hunger")
 
-    dpg.add_button(label="Start Server", callback=server_starter)
+    with dpg.group(horizontal=True):
+        dpg.add_button(label="Start Server", callback=server_starter)
+        dpg.add_checkbox(label="Frida Mod Loader", callback=set_settings, tag="mods")
 
 with dpg.window(label="About",tag="about",no_docking=True,no_collapse=True,autosize=True, show=not Globals.HasOpenedBefore):
     dpg.add_text("To get started, select the settings you would like then press start server and select your DreadHungerServer exectutable.\nTo stop the server, hold the esc key.", wrap=500)
@@ -183,7 +195,6 @@ with dpg.window(label="About",tag="about",no_docking=True,no_collapse=True,autos
 with dpg.theme() as global_theme:
 
     with dpg.theme_component(dpg.mvAll):
-
         dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 5)
         dpg.add_theme_style(dpg.mvStyleVar_GrabRounding,5)
         
