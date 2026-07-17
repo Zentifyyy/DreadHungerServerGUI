@@ -19,6 +19,7 @@ class Globals():
     ColdIntensity = 1
     HungerRate = 1
     ConsoleUpdateRate = 0.1
+    InjectDelay = 0.1
 
 def save_prefs():
     Globals.HasOpenedBefore = True
@@ -95,15 +96,18 @@ async def start_server():
         Globals.ServerProc = await asyncio.subprocess.create_subprocess_shell(
             f"{'"'}{Globals.ServerPath}{'"'} {args}"
         )
-        if Globals.ModLoader:
-            import dll_injector
-            import psutil
-            dll_injector.inject(Globals.ServerPath.removesuffix("DreadHungerServer.exe") + "frida.dll",process_pid=psutil.Process(Globals.ServerProc.pid).children(recursive=True)[1].pid)
-                
         dpg.configure_viewport("Dread Hunger Server",disable_close=True)
     except: 
         Globals.ServerPath = ""
         set_console_text("Server could not be started")
+
+    try:
+        await asyncio.sleep(Globals.InjectDelay)
+        import dll_injector
+        import psutil
+        dll_injector.inject(Globals.ServerPath.removesuffix("DreadHungerServer.exe") + "frida.dll",process_pid=psutil.Process(Globals.ServerProc.pid).children(recursive=True)[1].pid)
+    except:
+        set_console_text("Frida could not be injected")              
 
     while not Globals.ServerProc.returncode:
 
@@ -155,12 +159,17 @@ def set_settings(sender,app_data):
 def set_console_delay(sender,app_data):
     Globals.ConsoleUpdateRate = round(app_data,2)
 
+def set_inject_delay(sender,app_data):
+    Globals.InjectDelay = round(app_data,2)
+
 
 with dpg.viewport_menu_bar():
     with dpg.menu(label="File"):
         dpg.add_menu_item(label="Set Server Path", callback=set_server_path)
         dpg.add_menu_item(label="Save Prefs",callback=save_prefs)
         dpg.add_slider_float(label="Console Update Delay" ,format='%.1f', callback=set_console_delay,default_value=0.1,min_value=0.1,max_value=2,width=100)
+        dpg.add_slider_float(label="Frida Inject Delay" ,format='%.1f', callback=set_inject_delay,default_value=0.1,min_value=0.1,max_value=2,width=100)
+        dpg.add_text("If experiencing high cpu usage, increase Console Update Delay\nIf experiencing frida inject errors, increase Frida Inject Delay", wrap=250)
         
     with dpg.menu(label="About"):
         dpg.add_menu_item(label="About",callback=lambda:dpg.configure_item("about", show=True))
@@ -198,7 +207,6 @@ with dpg.theme() as global_theme:
         dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 5)
         dpg.add_theme_style(dpg.mvStyleVar_GrabRounding,5)
         
-
 dpg.bind_theme(global_theme)
 
 dpg.setup_dearpygui()
